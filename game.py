@@ -141,4 +141,63 @@ def battle_start(
     _set_active_battle(battle, obs_dict)
  
     return obs_dict, start_data
+ def battle_select(select_list: list[int]) -> dict:
+    """
+    Submit the player's selection and advance the game by one decision point.
+ 
+    Parameters
+    ----------
+    select_list : list[int]
+        Indices into obs_dict["select"]["option"].  Pass an empty list when
+        the game is in an automatic phase (select is None).
+ 
+    Returns
+    -------
+    dict
+        The updated obs_dict after the selection is applied.
+ 
+    Raises
+    ------
+    ValueError
+        If select_list is not a list of integers.
+    IndexError
+        If any index exceeds the number of available options.
+    RuntimeError
+        If the engine reports an error or no battle is active.
+    """
+    if not isinstance(select_list, list):
+        raise ValueError(f"select_list must be a list, got {type(select_list)}")
+    if not all(isinstance(i, int) for i in select_list):
+        raise ValueError("All elements of select_list must be integers")
+ 
+    battle = _get_active_battle()
+    raw    = battle.select(select_list)
+    obs_dict = _decode_obs(raw)
+    return _check_result(obs_dict, "battle_select")
+ 
+ 
+def battle_finish() -> None:
+    """
+    End the current battle and free all native resources.
+ 
+    Must be called after every episode (including abnormal terminations)
+    to avoid memory leaks in the C++ core.
+    """
+    battle = _active_battle
+    if battle is not None:
+        battle.finish()
+        _clear_active_battle()
+ 
+ 
+def visualize_data() -> str:
+    """
+    Return the current board state as a human-readable debug string.
+ 
+    Useful for logging; not intended for agent consumption.
+    """
+    battle = _get_active_battle()
+    raw    = battle.visualize()
+    if raw is None:
+        return ""
+    return raw.decode("utf-8") if isinstance(raw, bytes) else raw
  
