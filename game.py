@@ -201,3 +201,23 @@ def visualize_data() -> str:
         return ""
     return raw.decode("utf-8") if isinstance(raw, bytes) else raw
  
+
+ 
+_active_battle: sim.Battle | None = None
+ 
+ 
+def _set_active_battle(battle: sim.Battle, obs_dict: dict) -> None:
+    global _active_battle
+    _active_battle = battle
+ 
+ 
+def _get_active_battle() -> sim.Battle:
+    if _active_battle is None:
+        raise RuntimeError("No active battle — call battle_start() first.")
+    return _active_battle
+ 
+ 
+def _clear_active_battle() -> None:
+    global _active_battle
+    _active_battle = None
+ 
