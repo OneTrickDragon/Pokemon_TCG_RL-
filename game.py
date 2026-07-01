@@ -141,7 +141,8 @@ def battle_start(
     _set_active_battle(battle, obs_dict)
  
     return obs_dict, start_data
- def battle_select(select_list: list[int]) -> dict:
+
+def battle_select(select_list: list[int]) -> dict:
     """
     Submit the player's selection and advance the game by one decision point.
  
