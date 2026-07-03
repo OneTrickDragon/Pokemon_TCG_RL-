@@ -109,3 +109,62 @@ def encode_observation(obs_dict: dict, player_index: int) -> np.ndarray:
  
     assert i == OBS_DIM, f"encode_observation produced {i} values, expected {OBS_DIM}"
     return vec
+
+ 
+def _prize_count(player_state) -> int:
+    """Number of face-up prize cards remaining (i.e. not yet taken)."""
+    return sum(1 for p in player_state.get("prize", []) if p is not None)
+ 
+ 
+def compute_reward(
+    prev_obs: dict | None,
+    new_obs:  dict | None,
+    player_index: int,
+    done: bool,
+    result: int | None,
+) -> float:
+    """
+    Shaped reward from the perspective of `player_index`.
+ 
+    Terminal:
+      +1.0  win,  -1.0  loss,  0.0  draw / unknown
+ 
+    Per-step shaping (small signals to reduce sparsity):
+      +0.1   for each prize card WE took this step
+      -0.1   for each prize card OPP took this step
+      +0.05  for KO'ing opponent's active (active disappeared and opp prizes went down)
+      -0.05  for our active being KO'd
+    """
+    reward = 0.0
+ 
+    if done and result is not None:
+        if result == player_index:
+            reward += 1.0
+        elif result == (1 - player_index):
+            reward -= 1.0
+        # result == -1  → draw
+        return reward
+ 
+    if prev_obs is None or new_obs is None:
+        return reward
+ 
+    prev_curr = prev_obs.get("current")
+    new_curr  = new_obs.get("current")
+    if prev_curr is None or new_curr is None:
+        return reward
+ 
+    opp_index = 1 - player_index
+    prev_me   = prev_curr["players"][player_index]
+    prev_opp  = prev_curr["players"][opp_index]
+    new_me    = new_curr["players"][player_index]
+    new_opp   = new_curr["players"][opp_index]
+ 
+    # Prizes taken = previous prize count - current prize count
+    # (lower remaining prizes = more taken by the other side)
+    my_prizes_taken  = _prize_count(prev_opp) - _prize_count(new_opp)
+    opp_prizes_taken = _prize_count(prev_me)  - _prize_count(new_me)
+ 
+    reward += 0.1 * my_prizes_taken
+    reward -= 0.1 * opp_prizes_taken
+ 
+    return reward
