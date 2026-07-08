@@ -1,48 +1,94 @@
-import glob
-import math
-import os
-import random
-import sys
+"""
+Baseline competition agent for PTCGABC.
 
-import torch
-import torch.nn
-import torch.nn.functional
-import torch.optim
+The Kaggle simulation track expects this file to expose exactly:
 
-sys.path.append(glob.glob('/kaggle/input/**/cg-lib', recursive=True)[0])
+    def agent(obs_dict: dict) -> list[int]
 
-from cg.api import (
-    AreaType,
-    Card,
-    Observation,
-    OptionType,
-    PlayerState,
-    Pokemon,
-    SearchState,
-    SelectContext,
-    all_attack,
-    all_card_data,
-    search_begin,
-    search_end,
-    search_step,
-    to_observation_class,
-)
-from cg.game import battle_start, battle_finish, battle_select
+This implementation is intentionally dependency-light and works directly with
+the raw observation dictionary. It is a safe heuristic baseline, not a trained
+policy.
+"""
 
-# Load all card data from the API's helper function
-all_card = all_card_data()
-# Create a lookup table (dictionary) to quickly access card data by its cardId
-card_table = {c.cardId:c for c in all_card}
-card_count = max(all_card, key=lambda c: c.cardId).cardId + 1 # Max Card ID + 1
+from __future__ import annotations
 
-attack_count = max(all_attack(), key=lambda a: a.attackId).attackId + 1 # Max Attack ID + 1
 
-num_words_encoder = 24
-encoder_size = 22000 # Encoder input size exceeding the vocabulary size
+# OptionType integer values from the cabt API.
+OPTION_NUMBER = 0
+OPTION_YES = 1
+OPTION_NO = 2
+OPTION_CARD = 3
+OPTION_TOOL_CARD = 4
+OPTION_ENERGY_CARD = 5
+OPTION_ENERGY = 6
+OPTION_PLAY = 7
+OPTION_ATTACH = 8
+OPTION_EVOLVE = 9
+OPTION_ABILITY = 10
+OPTION_DISCARD = 11
+OPTION_RETREAT = 12
+OPTION_ATTACK = 13
+OPTION_END = 14
+OPTION_SKILL = 15
+OPTION_SPECIAL_CONDITION = 16
 
-decoder_main_feature = 8 # Feature count of SelectContext.Main
-decoder_attack_offset = 14 # First index of Attack feature
-decoder_card_offset = decoder_attack_offset + attack_count # First index of Card Feature
-decoder_size = decoder_card_offset + (1 + decoder_main_feature + SelectContext.RECOVER_SPECIAL_CONDITION) * card_count # Decoder input vocabulary size
 
-SEARCH_COUNT = 10
+MAIN_ACTION_PRIORITY = {
+    OPTION_ATTACK: 0,
+    OPTION_EVOLVE: 1,
+    OPTION_PLAY: 2,
+    OPTION_ATTACH: 3,
+    OPTION_ABILITY: 4,
+    OPTION_SKILL: 5,
+    OPTION_RETREAT: 6,
+    OPTION_END: 20,
+}
+
+GENERIC_ACTION_PRIORITY = {
+    OPTION_YES: 0,
+    OPTION_CARD: 1,
+    OPTION_ENERGY_CARD: 2,
+    OPTION_TOOL_CARD: 3,
+    OPTION_ENERGY: 4,
+    OPTION_SPECIAL_CONDITION: 5,
+    OPTION_NUMBER: 6,
+    OPTION_NO: 10,
+    OPTION_DISCARD: 12,
+    OPTION_END: 20,
+}
+
+
+def agent(obs_dict: dict) -> list[int]:
+    """
+    Return selected option indices for the current cabt observation.
+
+    The engine only presents legal options. For multi-select prompts, the agent
+    chooses the best-scored option first and then fills the remaining required
+    slots with the next best distinct options.
+    """
+    select = (obs_dict or {}).get("select") or {}
+    options = select.get("option") or []
+    max_count = int(select.get("maxCount", 0) or 0)
+    if not options or max_count <= 0:
+        return []
+
+    ranked = sorted(range(len(options)), key=lambda i: (_score_option(options[i]), i))
+    return ranked[: min(max_count, len(ranked))]
+
+
+def _score_option(option: dict) -> int:
+    option_type = option.get("type")
+
+    # Main-turn options are where avoiding premature END matters most.
+    if option_type in MAIN_ACTION_PRIORITY:
+        score = MAIN_ACTION_PRIORITY[option_type]
+    else:
+        score = GENERIC_ACTION_PRIORITY.get(option_type, 8)
+
+    # Prefer low numeric counts when the engine asks for a number. This is
+    # conservative for damage/discard prompts and deterministic for testing.
+    if option_type == OPTION_NUMBER:
+        number = option.get("number", option.get("count", 0)) or 0
+        score = score * 100 + int(number)
+
+    return score
